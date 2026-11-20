@@ -119,8 +119,6 @@ from osdagbridge.core.utils.common import (
 )
 
 from osdagbridge.core.reports.report_utils import _tex
-from .styles import get_latex_styles_preamble
-from .chart_generator import generate_ur_summary_chart, generate_material_quantity_charts, extract_ur_data_from_bridge
 from .executive_summary import executive_summary
 from .chap1 import ch1_project_info
 from .chap2 import ch2_input_parameters
@@ -157,10 +155,8 @@ def preamble(project_name, job_number, report_date, report_version='Rev 0'):
     return r"""
 \documentclass[12pt,a4paper]{report}
 
-% Centralized Layout, Geometry, Color & Table Styles
-""" + get_latex_styles_preamble() + r"""
-
 % Packages
+\usepackage[a4paper, margin=1in]{geometry}
 \usepackage{graphicx}
 \usepackage{amsmath}
 \usepackage{amssymb}
@@ -196,6 +192,21 @@ def preamble(project_name, job_number, report_date, report_version='Rev 0'):
 
 \numberwithin{table}{chapter}
 \numberwithin{figure}{chapter}
+% Table layout and spacing: consistent padding, row height, and longtable pre/post skips
+\setlength{\tabcolsep}{6pt}
+\renewcommand{\arraystretch}{1.12}
+\setlength{\LTpre}{0pt}
+\setlength{\LTpost}{6pt}
+% Table rules (outline thickness) and small extra row height for clarity
+\setlength{\arrayrulewidth}{0.5pt}
+\setlength{\extrarowheight}{0.6pt}
+
+% Prevent tables from overflowing past the page bottom:
+% if fewer than 5 baseline-skips remain, break to the next page first.
+\BeforeBeginEnvironment{table}{\needspace{5\baselineskip}}
+\BeforeBeginEnvironment{longtable}{\needspace{5\baselineskip}}
+
+\definecolor{osdagGreen}{HTML}{91B014}
 
 \fancypagestyle{main}{
   \fancyhf{}
@@ -206,13 +217,13 @@ def preamble(project_name, job_number, report_date, report_version='Rev 0'):
   \renewcommand{\headrule}{\color{osdagGreen}\hrule width\headwidth height 1pt \vspace{2pt}}
   \renewcommand{\footrule}{%
     \ifbool{hasSDonPage}{%
-      \vspace{-12pt}%
+      \vspace{-20pt}%
       \hbox to \headwidth{\textcolor{black}{\footnotesize\textit{* Software default value}}\hfil}%
-      \vspace{2pt}%
+      \vspace{4pt}%
     }{%
-      \vspace{-4pt}%
+      \vspace{-8pt}%
     }%
-    \color{osdagGreen}\hrule width\headwidth height 1pt \vspace{4pt}%
+    \color{osdagGreen}\hrule width\headwidth height 1pt \vspace{6pt}%
   }
 }
 \fancypagestyle{plain}{
@@ -224,13 +235,13 @@ def preamble(project_name, job_number, report_date, report_version='Rev 0'):
   \renewcommand{\headrule}{\color{osdagGreen}\hrule width\headwidth height 1pt \vspace{2pt}}
   \renewcommand{\footrule}{%
     \ifbool{hasSDonPage}{%
-      \vspace{-12pt}%
+      \vspace{-20pt}%
       \hbox to \headwidth{\textcolor{black}{\footnotesize\textit{* Software default value}}\hfil}%
-      \vspace{2pt}%
+      \vspace{4pt}%
     }{%
-      \vspace{-4pt}%
+      \vspace{-8pt}%
     }%
-    \color{osdagGreen}\hrule width\headwidth height 1pt \vspace{4pt}%
+    \color{osdagGreen}\hrule width\headwidth height 1pt \vspace{6pt}%
   }
 }
 \fancypagestyle{firstpage}{
@@ -238,7 +249,7 @@ def preamble(project_name, job_number, report_date, report_version='Rev 0'):
   \renewcommand{\headrulewidth}{0pt}
   \fancyfoot[L]{Osdag $|$ FOSSEE $|$ Indian Institute of Technology Bombay}
   \fancyfoot[R]{Page \thepage\ of \pageref{LastPage}}
-  \renewcommand{\footrule}{\vspace{-4pt}\color{osdagGreen}\hrule width\headwidth height 1pt \vspace{4pt}}
+  \renewcommand{\footrule}{\vspace{-8pt}\color{osdagGreen}\hrule width\headwidth height 1pt \vspace{6pt}}
 }
 \pagestyle{main}
 \setstretch{1.15}
@@ -892,21 +903,6 @@ def generate_report(payload, request):
             bridge = ReportDataBridge(payload.output_dict, payload.inputs, payload)
             span_m = float(payload.inputs.get(KEY_SPAN, 0) or 0)
 
-            # Generate programmatic charts for Section 5.5 and Chapter 7
-            try:
-                ur_data = extract_ur_data_from_bridge(bridge)
-                ur_chart_path = os.path.join(tmp_images, 'overall_ur_summary.png')
-                if generate_ur_summary_chart(ur_data, ur_chart_path):
-                    fig_paths['overall_ur_summary'] = ur_chart_path.replace('\\', '/')
-
-                steel_p, conc_p = generate_material_quantity_charts(quantities, tmp_images)
-                if steel_p:
-                    fig_paths['material_steel_tonnage'] = steel_p.replace('\\', '/')
-                if conc_p:
-                    fig_paths['material_concrete_rebar'] = conc_p.replace('\\', '/')
-            except Exception as chart_err:
-                logger.warning(f"Error generating report charts: {chart_err}")
-
             doc_parts = []
             doc_parts.append(preamble(payload.metadata.project_name, payload.metadata.job_number, payload.metadata.report_date, payload.metadata.subtitle or 'Rev 0'))
             doc_parts.append(title_page(payload.metadata, osdag_logo_latex, org_logo_latex))
@@ -928,11 +924,11 @@ def generate_report(payload, request):
             if 'analysis' in secs:
                 doc_parts.append(ch4_analysis(payload.analysis_summary, fig_paths, bridge, span_m))
             if 'design_checks' in secs:
-                doc_parts.append(ch5_design_checks(payload.design_checks, bridge, fig_paths))
+                doc_parts.append(ch5_design_checks(payload.design_checks, bridge))
             if 'drawings' in secs and payload.options.include_figures:
                 doc_parts.append(ch6_drawings(fig_paths))
 
-            doc_parts.append(ch7_quantities(payload.inputs, fig_paths))
+            doc_parts.append(ch7_quantities(payload.inputs))
 
             mode = str(payload.inputs.get(KEY_DESIGN_MODE, "Optimized")).strip().lower()
             is_custom = mode in {"custom", "customized"}
